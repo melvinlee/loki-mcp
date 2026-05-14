@@ -48,18 +48,22 @@ def _auth() -> tuple[str, str] | None:
     return None
 
 
-def _client() -> httpx.AsyncClient:
+def _client(org_id: str | None = None) -> httpx.AsyncClient:
+    headers = {}
+    if org_id:
+        headers["X-Scope-OrgID"] = org_id
     return httpx.AsyncClient(
         base_url=LOKI_URL,
         auth=_auth(),
+        headers=headers,
         timeout=LOKI_TIMEOUT,
     )
 
 
-async def _loki_get(path: str, params: dict) -> dict:
+async def _loki_get(path: str, params: dict, org_id: str | None = None) -> dict:
     """Make a GET request to Loki with structured request/response logging."""
     start = time.perf_counter()
-    async with _client() as client:
+    async with _client(org_id=org_id) as client:
         try:
             resp = await client.get(path, params=params)
             duration_ms = round((time.perf_counter() - start) * 1000, 2)
@@ -68,6 +72,7 @@ async def _loki_get(path: str, params: dict) -> dict:
                 path=path,
                 status_code=resp.status_code,
                 duration_ms=duration_ms,
+                org_id=org_id,
             )
             resp.raise_for_status()
             return resp.json()
@@ -166,6 +171,7 @@ async def query_logs(
     query: str,
     limit: int = 100,
     time: Optional[str] = None,
+    org_id: Optional[str] = None,
 ) -> str:
     """Execute an instant LogQL query and return matching log lines.
 
@@ -175,14 +181,15 @@ async def query_logs(
         time: Point-in-time for the query. Accepts ISO-8601, Unix epoch,
               or duration offsets like '1h', '30m', '2d' (relative to now).
               Defaults to now.
+        org_id: Loki tenant ID sent as X-Scope-OrgID header for tenant isolation.
     """
-    log.info("tool_called", tool="query_logs", query=query, limit=limit, time=time)
+    log.info("tool_called", tool="query_logs", query=query, limit=limit, time=time, org_id=org_id)
 
     params: dict = {"query": query, "limit": limit}
     if time is not None:
         params["time"] = _parse_time(time, default_offset_hours=0)
 
-    data = await _loki_get("/loki/api/v1/query", params)
+    data = await _loki_get("/loki/api/v1/query", params, org_id=org_id)
     result = _render_response(data)
 
     log.info("tool_completed", tool="query_logs", query=query)
@@ -197,6 +204,7 @@ async def query_range(
     limit: int = 100,
     step: Optional[str] = None,
     direction: str = "backward",
+    org_id: Optional[str] = None,
 ) -> str:
     """Execute a LogQL range query and return log lines or metric values over time.
 
@@ -209,8 +217,9 @@ async def query_range(
         step: Query resolution for metric queries, e.g. '1m', '5m', '1h'.
               Loki infers a sensible default when omitted.
         direction: 'forward' (oldest first) or 'backward' (newest first, default).
+        org_id: Loki tenant ID sent as X-Scope-OrgID header for tenant isolation.
     """
-    log.info("tool_called", tool="query_range", query=query, start=start, end=end, limit=limit, step=step, direction=direction)
+    log.info("tool_called", tool="query_range", query=query, start=start, end=end, limit=limit, step=step, direction=direction, org_id=org_id)
 
     params: dict = {
         "query": query,
@@ -222,7 +231,7 @@ async def query_range(
     if step:
         params["step"] = step
 
-    data = await _loki_get("/loki/api/v1/query_range", params)
+    data = await _loki_get("/loki/api/v1/query_range", params, org_id=org_id)
     result = _render_response(data)
 
     log.info("tool_completed", tool="query_range", query=query)
@@ -233,20 +242,22 @@ async def query_range(
 async def get_labels(
     start: str = "24h",
     end: Optional[str] = None,
+    org_id: Optional[str] = None,
 ) -> str:
     """Return all label names present in Loki within the given time range.
 
     Args:
         start: Start of the time range (default '24h' ago).
         end: End of the time range (defaults to now).
+        org_id: Loki tenant ID sent as X-Scope-OrgID header for tenant isolation.
     """
-    log.info("tool_called", tool="get_labels", start=start, end=end)
+    log.info("tool_called", tool="get_labels", start=start, end=end, org_id=org_id)
 
     params = {
         "start": _parse_time(start, default_offset_hours=24),
         "end": _parse_time(end, default_offset_hours=0),
     }
-    data = await _loki_get("/loki/api/v1/labels", params)
+    data = await _loki_get("/loki/api/v1/labels", params, org_id=org_id)
 
     labels = data.get("data", [])
     if not labels:
@@ -263,6 +274,7 @@ async def get_label_values(
     start: str = "24h",
     end: Optional[str] = None,
     query: Optional[str] = None,
+    org_id: Optional[str] = None,
 ) -> str:
     """Return all values for a specific label in Loki.
 
@@ -272,8 +284,9 @@ async def get_label_values(
         end: End of the time range (defaults to now).
         query: Optional LogQL stream selector to scope results,
                e.g. '{namespace="prod"}'.
+        org_id: Loki tenant ID sent as X-Scope-OrgID header for tenant isolation.
     """
-    log.info("tool_called", tool="get_label_values", label=label, start=start, end=end, query=query)
+    log.info("tool_called", tool="get_label_values", label=label, start=start, end=end, query=query, org_id=org_id)
 
     params: dict = {
         "start": _parse_time(start, default_offset_hours=24),
@@ -282,7 +295,7 @@ async def get_label_values(
     if query:
         params["query"] = query
 
-    data = await _loki_get(f"/loki/api/v1/label/{label}/values", params)
+    data = await _loki_get(f"/loki/api/v1/label/{label}/values", params, org_id=org_id)
 
     values = data.get("data", [])
     if not values:
@@ -298,6 +311,7 @@ async def get_series(
     match: str,
     start: str = "1h",
     end: Optional[str] = None,
+    org_id: Optional[str] = None,
 ) -> str:
     """Return log stream descriptors (label sets) matching a selector.
 
@@ -305,15 +319,16 @@ async def get_series(
         match: LogQL stream selector, e.g. '{app="nginx"}' or '{job=~".+"}'.
         start: Start of the time range (default '1h' ago).
         end: End of the time range (defaults to now).
+        org_id: Loki tenant ID sent as X-Scope-OrgID header for tenant isolation.
     """
-    log.info("tool_called", tool="get_series", match=match, start=start, end=end)
+    log.info("tool_called", tool="get_series", match=match, start=start, end=end, org_id=org_id)
 
     params = {
         "match[]": match,
         "start": _parse_time(start, default_offset_hours=1),
         "end": _parse_time(end, default_offset_hours=0),
     }
-    data = await _loki_get("/loki/api/v1/series", params)
+    data = await _loki_get("/loki/api/v1/series", params, org_id=org_id)
 
     series = data.get("data", [])
     if not series:
@@ -333,6 +348,7 @@ async def get_stats(
     query: str,
     start: str = "1h",
     end: Optional[str] = None,
+    org_id: Optional[str] = None,
 ) -> str:
     """Return index and ingester statistics for a LogQL query without fetching log data.
 
@@ -342,15 +358,16 @@ async def get_stats(
         query: LogQL stream selector, e.g. '{namespace="prod"}'.
         start: Start of the time range (default '1h' ago).
         end: End of the time range (defaults to now).
+        org_id: Loki tenant ID sent as X-Scope-OrgID header for tenant isolation.
     """
-    log.info("tool_called", tool="get_stats", query=query, start=start, end=end)
+    log.info("tool_called", tool="get_stats", query=query, start=start, end=end, org_id=org_id)
 
     params = {
         "query": query,
         "start": _parse_time(start, default_offset_hours=1),
         "end": _parse_time(end, default_offset_hours=0),
     }
-    data = await _loki_get("/loki/api/v1/index/stats", params)
+    data = await _loki_get("/loki/api/v1/index/stats", params, org_id=org_id)
 
     log.info("tool_completed", tool="get_stats", query=query)
     return json.dumps(data, indent=2)
