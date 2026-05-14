@@ -1,0 +1,16 @@
+# Claude Code local settings
+.claude/settings.local.json
+
+# Optional: Ignore the entire .claude directory if you don't 
+# want to share any prompts/context
+.claude/
+
+# Ignore Visual Studio Code settings for the MCP project
+.vscode/mcp.json
+
+# Local MCP config (contains machine-specific paths and credentials)
+claude_mcp_config.json
+
+# Python cache
+__pycache__
+
