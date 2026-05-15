@@ -3,6 +3,7 @@ import json
 import os
 import time
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Optional
 
 import httpx
@@ -37,7 +38,9 @@ mcp = FastMCP(
     instructions=(
         "Tools for querying Grafana Loki log aggregation system using LogQL. "
         "Use query_logs for instant queries, query_range for log retrieval over a time window, "
-        "get_labels / get_label_values to explore available metadata, and get_series to discover streams."
+        "get_labels / get_label_values to explore available metadata, and get_series to discover streams. "
+        "Read loki://docs/query-guide for LogQL syntax, time formats, and common query recipes "
+        "before answering questions about log querying."
     ),
 )
 
@@ -371,6 +374,18 @@ async def get_stats(
 
     log.info("tool_completed", tool="get_stats", query=query)
     return json.dumps(data, indent=2)
+
+
+_DOCS_DIR = Path(__file__).parent.parent.parent / "docs"
+
+
+@mcp.resource("loki://docs/query-guide")
+async def query_guide() -> str:
+    """LogQL query guide — tools overview, time formats, stream selectors, and common recipes."""
+    log.info("resource_read", resource="loki://docs/query-guide")
+    content = (_DOCS_DIR / "query-guide.md").read_text()
+    log.info("resource_completed", resource="loki://docs/query-guide", bytes=len(content))
+    return content
 
 
 def main() -> None:
