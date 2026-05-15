@@ -383,7 +383,9 @@ _DOCS_DIR = Path(__file__).parent.parent.parent / "docs"
 async def query_guide() -> str:
     """LogQL query guide — tools overview, time formats, stream selectors, and common recipes."""
     log.info("resource_read", resource="loki://docs/query-guide")
+    
     content = (_DOCS_DIR / "query-guide.md").read_text()
+
     log.info("resource_completed", resource="loki://docs/query-guide", bytes=len(content))
     return content
 
